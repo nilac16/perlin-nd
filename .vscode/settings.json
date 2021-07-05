@@ -1,0 +1,15 @@
+{
+    "files.associations": {
+        "alloca.h": "c",
+        "omp.h": "c",
+        "stb_image_write.h": "c",
+        "xsaveintrin.h": "c",
+        "perlin.h": "c",
+        "immintrin.h": "c",
+        "xmmintrin.h": "c",
+        "xtestintrin.h": "c",
+        "intrin.h": "c",
+        "x86intrin.h": "c",
+        "emmintrin.h": "c"
+    }
+}
