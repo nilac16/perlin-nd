@@ -24,9 +24,7 @@ unsigned char *perlin_noise(size_t dimensions,
                             size_t seed, int octave);
 
 /**
- *  Everything below this point can be used to generate a raw image of floats. 
- *  The above function does all of this, then converts it to an array of chars
- */
+ *  Everything below this point can be used to generate a raw image of floats. */
 
 struct perlin_hypergrid;
 
