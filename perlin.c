@@ -2,16 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "include/perlin.h"
+#include "perlin.h"
 
 #ifdef _OPENMP
 #include <omp.h>
-#endif
-
-#ifdef __GNUC__
-#define gnu_attribute(...) __attribute__((__VA_ARGS__))
-#else
-#define gnu_attribute(...)
 #endif
 
 
@@ -36,23 +30,24 @@ struct perlin_hypergrid {
 };
 
 
-gnu_attribute(const)
 inline static size_t pow2l(size_t n)
 {
     return (size_t)1 << n;
 }
 
-gnu_attribute(always_inline)
+
 inline static double random_unity()
 {
     return (2 * (double)rand() / RAND_MAX) - 1;
 }
 
-gnu_attribute(nonnull)
+
 static void random_unit_vector(size_t dim, double r[static dim])
 {
     double inner = 0.;
-    for (size_t i = 0; i < dim; i++) {
+    size_t i;
+
+    for (i = 0; i < dim; i++) {
         r[i] = random_unity();
         inner += r[i] * r[i];
     }
@@ -60,27 +55,31 @@ static void random_unit_vector(size_t dim, double r[static dim])
         random_unit_vector(dim, r);
     } else {
         inner = sqrt(inner);
-        for (size_t i = 0; i < dim; i++) {
+        for (i = 0; i < dim; i++) {
             r[i] /= inner;
         }
     }
 }
 
-gnu_attribute(nonnull, pure)
-/// finds the product of every component in @p density
+
+/** finds the product of every component in @p density */
 static size_t integrate_density(size_t dim, const size_t density[static dim])
 {
-    size_t N = 1;
-    for (size_t i = 0; i < dim; i++) {
+    size_t N = 1, i;
+
+    for (i = 0; i < dim; i++) {
         N *= density[i];
     }
     return N;
 }
 
-gnu_attribute(malloc)
+
 struct perlin_hypergrid *new_perlin_hypergrid(size_t rank, const size_t density[static rank])
 {
-    struct perlin_hypergrid *grid = malloc(sizeof *grid);
+    struct perlin_hypergrid *grid;
+    size_t N;
+
+    grid = malloc(sizeof *grid);
     if (!grid) {
         return grid;
     }
@@ -97,7 +96,7 @@ struct perlin_hypergrid *new_perlin_hypergrid(size_t rank, const size_t density[
         free(grid);
         return NULL;
     }
-    const size_t N = integrate_density(rank, density);
+    N = integrate_density(rank, density);
     printf("Hypergrid will have %lu lattice points\n", N);
     printf("Allocating space for %lu doubles\n", N * rank);
     grid->locations = malloc(N * rank * (sizeof *grid->locations));
@@ -118,7 +117,7 @@ struct perlin_hypergrid *new_perlin_hypergrid(size_t rank, const size_t density[
     return grid;
 }
 
-gnu_attribute(nonnull)
+
 void free_perlin_hypergrid(struct perlin_hypergrid *hg)
 {
     free(hg->vectors);
@@ -128,32 +127,24 @@ void free_perlin_hypergrid(struct perlin_hypergrid *hg)
     free(hg);
 }
 
-gnu_attribute(nonnull)
+
 void set_perlin_hypergrid_resolution(struct perlin_hypergrid *hg,
-                                     const size_t resolution[static hg->rank])
+                                     const size_t             res[])
 {
-    memcpy(hg->resolution, resolution, hg->rank * (sizeof *hg->resolution));
-/// STRATAGEM:
-///     Find the 0 coordinate along dimension 0
-///     Along dimension 1, copy the entire set of dimension 0 coordinates
-///     and set the dimension 1 coordinate
-///     Then repeat for dimension 2 with the combined dim 0 and dim 1
-///     coordinates
-/// You only need to keep track of the current dimensional offset, which
-/// increases as the dimension multiplier whenever a loop is completed
+    size_t d_mult = 1, dim, stride, dim_limit, i, j;
     double cell_res, coord;
-    size_t d_mult = 1;
-    for (size_t dim = 0; dim < hg->rank; dim++) {
-                       /* I got fenceposted here vvv */
+
+    memcpy(hg->resolution, res, hg->rank * (sizeof *hg->resolution));
+    for (dim = 0; dim < hg->rank; dim++) {
         cell_res = (double)(hg->resolution[dim] - 1) / (hg->density[dim] - 1);
         coord = 0.;
-        size_t stride = d_mult * hg->rank;
-        size_t dim_limit = stride * hg->density[dim];
-        for (size_t i = 0; i < dim_limit; i += stride) {
+        stride = d_mult * hg->rank;
+        dim_limit = stride * hg->density[dim];
+        for (i = 0; i < dim_limit; i += stride) {
             if (i) {
                 memcpy(hg->locations + i, hg->locations, stride * (sizeof *hg->locations));
             }
-            for (size_t j = 0; j < stride; j += hg->rank) {
+            for (j = 0; j < stride; j += hg->rank) {
                 hg->locations[i + j + dim] = coord;
             }
             coord += cell_res;
@@ -162,26 +153,25 @@ void set_perlin_hypergrid_resolution(struct perlin_hypergrid *hg,
     }
 }
 
-gnu_attribute(nonnull)
+
 void randomize_perlin_vectors(struct perlin_hypergrid *hg, size_t seed)
 {
-    srand(seed);
-    const size_t N = hg->rank * integrate_density(hg->rank, hg->density);
-    for (size_t i = 0; i < N; i += hg->rank) {
+    size_t N, i;
+
+    srand(seed);    // what why
+    N = hg->rank * integrate_density(hg->rank, hg->density);
+    for (i = 0; i < N; i += hg->rank) {
         random_unit_vector(hg->rank, hg->vectors + i);
     }
 }
 
-gnu_attribute(nonnull, pure)
+
 static size_t find_hypercube_origin(const struct perlin_hypergrid *hg,
                                     const size_t coords[static hg->rank])
 {
-    // delinearize in-place
-    // in each dimension, find out which cell the point is in by dividing the
-    // point's coordinate by the pixels per hypercube
-    // add that times the dimension multiplier to the running index
-    size_t idx = 0, d_mult = 1, hcube_offset;
-    for (size_t dim = 0; dim < hg->rank; dim++) {
+    size_t idx = 0, d_mult = 1, hcube_offset, dim;
+
+    for (dim = 0; dim < hg->rank; dim++) {
         hcube_offset = (coords[dim] * (hg->density[dim] - 1)) / hg->resolution[dim];
         idx += d_mult * hcube_offset;
         d_mult *= hg->density[dim];
@@ -189,16 +179,16 @@ static size_t find_hypercube_origin(const struct perlin_hypergrid *hg,
     return idx;
 }
 
-gnu_attribute(nonnull)
+
 // first index contains the hypercube origin
 static void locate_hypercube_vertices(const struct perlin_hypergrid *hg,
-                                      size_t vertices[static (1 << hg->rank)])
+                                      size_t vertices[])
 {
-    // ok, you figured this out once, you can do it again
-    size_t d_mult = 1, n = 1;
-    for (size_t dim = 0; dim < hg->rank; dim++) {
+    size_t d_mult = 1, n = 1, dim, i;
+
+    for (dim = 0; dim < hg->rank; dim++) {
         memcpy(vertices + n, vertices, n * (sizeof *vertices));
-        for (size_t i = 0; i < n; i++) {
+        for (i = 0; i < n; i++) {
             vertices[n + i] += d_mult;
         }
         d_mult *= hg->density[dim];
@@ -206,34 +196,36 @@ static void locate_hypercube_vertices(const struct perlin_hypergrid *hg,
     }
 }
 
-gnu_attribute(nonnull, pure)
+
 static const double *get_hypergrid_lattice_vector(const struct perlin_hypergrid *hg, size_t i)
 {
     return hg->vectors + i * hg->rank;
 }
 
-gnu_attribute(nonnull, pure)
+
 static const double *get_hypergrid_lattice_point(const struct perlin_hypergrid *hg, size_t i)
 {
     return hg->locations + i * hg->rank;
 }
 
-gnu_attribute(nonnull, pure)
+
 /// dot the input coordinates with the vector at @p i in @p hg
 static double dot_perlin_vector(const struct perlin_hypergrid *hg, size_t h,
                                 const size_t coords[static hg->rank])
 {
-    const double *const vect = get_hypergrid_lattice_vector(hg, h);
-    const double *const origin = get_hypergrid_lattice_point(hg, h);
-    double x = 0.;
-    for (size_t i = 0; i < hg->rank; i++) {
-        x += vect[i] * ((double)coords[i] - origin[i]);
+    const double *vect, *origin;
+    double x = 0.0;
+    size_t i;
+
+    vect = get_hypergrid_lattice_vector(hg, h);
+    origin = get_hypergrid_lattice_point(hg, h);
+    for (i = 0; i < hg->rank; i++) {
+        x = fma(vect[i], (double)coords[i] - origin[i], x);
     }
-    //#endif
     return x;
 }
 
-gnu_attribute(const, unused)
+
 /// Input shall be the dot products along some dimension as @p p0 and @p p1, 
 /// and the RELATIVE coordinate in that dimension of the field point @p x
 ///
@@ -250,68 +242,74 @@ static double interpol8(double p0, double p1, double x)
     return p0 + (p1 - p0) * x * x * x * (10 - 15 * x + 6 * x * x);
 }
 
-gnu_attribute(nonnull, pure)
+
 static double dot_perlin_hypercube(const struct perlin_hypergrid *hg, 
-                                   const size_t coords[static restrict hg->rank],
-                                   size_t vertices[static restrict (1 << hg->rank)],
-                                   double dots[static (1 << hg->rank)])
+                                   const size_t                   coords[],
+                                   size_t                         vertices[],
+                                   double                         dots[])
 {
+    size_t N, i, dim, di;
+    double relative;
+
     *vertices = find_hypercube_origin(hg, coords);
     // now dot with hyper's vector, and all of its cohypercubical vertices
     locate_hypercube_vertices(hg, vertices);
-    const size_t N = pow2l(hg->rank);
-    for (size_t i = 0; i < N; i++) {
+    N = pow2l(hg->rank);
+    for (i = 0; i < N; i++) {
         dots[i] = dot_perlin_vector(hg, vertices[i], coords);
     }
     // now "interpolate" along each dimension
-    for (size_t dim = 0; dim < hg->rank; dim++) {
-        size_t di = pow2l(dim);
-        double relative = (double)coords[dim] - hg->locations[hg->rank * vertices[0] + dim];
+    for (dim = 0; dim < hg->rank; dim++) {
+        di = pow2l(dim);
+        relative = (double)coords[dim] - hg->locations[hg->rank * vertices[0] + dim];
         relative /= hg->locations[hg->rank * vertices[di] + dim] - hg->locations[hg->rank * vertices[0] + dim];
-        for (size_t i = 0; i < N; i += 2 * di) {
+        for (i = 0; i < N; i += 2 * di) {
             dots[i] = interpol8(dots[i], dots[i + di], relative);
         }
     }
     return *dots;
 }
 
-gnu_attribute(nonnull)
-/// This function is a bottleneck
+
 static void delinearize_coordinate(int rank, size_t coords[static restrict rank],
                                    const size_t resolution[static restrict rank])
 {
-    size_t idx = coords[0];
+    size_t idx = coords[0], d_mult;
+    int i;
+
     coords[0] = 1;
-    for (int i = 1; i < rank; i++) {
+    for (i = 1; i < rank; i++) {
         // put the dimension multiple in coords[i]
         coords[i] = coords[i - 1] * resolution[i - 1];
     }
-    size_t d_mult;
-    for (int i = rank - 1; i >= 0; i--) {
+    for (i = rank - 1; i >= 0; i--) {
         d_mult = coords[i];
         coords[i] = idx / d_mult;
         idx -= coords[i] * d_mult;
     }
 }
 
-gnu_attribute(nonnull, malloc)
+
 float *generate_perlin_noise(const struct perlin_hypergrid *hg, size_t *n_pix)
 {
-    const size_t N = *n_pix = integrate_density(hg->rank, hg->resolution);
-    float *img = malloc(N * (sizeof *img));
+    size_t N, *local_coords, *local_vertices, N_locals, N_vertices;
+    size_t thread_coord_offset = 0, thread_vertex_offset = 0;
+    double *local_dots;
+    float *img;
+
+    N = *n_pix = integrate_density(hg->rank, hg->resolution);
+    img = malloc(N * (sizeof *img));
     if (!img) {
         *n_pix = 0;
         return img;
     }
-    size_t *local_coords, *local_vertices;
-    size_t N_locals = hg->rank, N_vertices = pow2l(hg->rank);
-    size_t thread_coord_offset = 0, thread_vertex_offset = 0;
-    double *local_dots;
-    #ifdef _OPENMP
+    N_locals = hg->rank;
+    N_vertices = pow2l(hg->rank);
+#ifdef _OPENMP
     N_locals *= omp_get_max_threads();
     N_vertices *= omp_get_max_threads();
     printf("Allocating space for %lu possible threads, %lu dimensions: %lu\n", (size_t)omp_get_max_threads(), hg->rank, N_locals);
-    #endif //_OPENMP
+#endif //_OPENMP
     local_coords = malloc(N_locals * (sizeof *local_coords));
     if (!local_coords) {
         *n_pix = 0;
@@ -357,16 +355,18 @@ float *generate_perlin_noise(const struct perlin_hypergrid *hg, size_t *n_pix)
     return img;
 }
 
-gnu_attribute(nonnull)
+
 static void floating_extrema(size_t N,
                              const float arr[static restrict N],
                              float *restrict min, float *restrict max)
 {
+    size_t i;
+
     if (!N) {
         return;
     }
     *min = *max = *arr;
-    for (size_t i = 1; i < N; i++) {
+    for (i = 1; i < N; i++) {
         if (arr[i] > *max) {
             *max = arr[i];
         }
@@ -376,19 +376,22 @@ static void floating_extrema(size_t N,
     }
 }
 
-gnu_attribute(nonnull, malloc)
+
 static unsigned char *convert_noise_to_image(size_t N, const float img[static N])
 {
-    unsigned char *out = malloc(N * (sizeof *out));
+    float min = 0.0, max = 0.0, value;
+    unsigned char *out;
+    size_t i;
+    
+    out = malloc(N * (sizeof *out));
     if (!out) {
         return out;
     }
-    float min = 0., max = 0., value;
     floating_extrema(N, img, &min, &max);
     #ifdef _OPENMP
     #pragma omp parallel for
     #endif //_OPENMP
-    for (size_t i = 0; i < N; i++) {
+    for (i = 0; i < N; i++) {
         //value = 255. * (img[i] - min) / (max - min);
         value = interpol8(0., 255., (img[i] - min) / (max - min));
         out[i] = value;
@@ -396,29 +399,35 @@ static unsigned char *convert_noise_to_image(size_t N, const float img[static N]
     return out;
 }
 
-gnu_attribute(nonnull, malloc)
+
 unsigned char *perlin_noise(const size_t dimensions,
                             const size_t density[static dimensions],
                             const size_t resolution[static dimensions],
                             size_t seed, int octave)
 {
-    size_t density_actual[dimensions];
-    for (size_t i = 0; i < dimensions; i++) {
+    size_t density_actual[dimensions];  /* Casual VLA?? */
+    struct perlin_hypergrid *g;
+    unsigned char *img;
+    float *noise;
+    size_t N, i;
+
+    for (i = 0; i < dimensions; i++) {
         density_actual[i] = density[i] * ((size_t)1 << octave);
     }
-    struct perlin_hypergrid *g = new_perlin_hypergrid(dimensions, density_actual);
+    
+    g = new_perlin_hypergrid(dimensions, density_actual);
     if (!g) {
         return NULL;
     }
     set_perlin_hypergrid_resolution(g, resolution);
     randomize_perlin_vectors(g, seed);
-    size_t N;
-    float *noise = generate_perlin_noise(g, &N);
+    noise = generate_perlin_noise(g, &N);
     free_perlin_hypergrid(g);
-    unsigned char *img = convert_noise_to_image(N, noise);
+    img = convert_noise_to_image(N, noise);
     free(noise);
     return img;
 }
+
 
 /* gnu_attribute(nonnull)
 static void linearize_coordinates(int rank, size_t coords[static restrict rank],

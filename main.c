@@ -9,7 +9,7 @@
 #include <omp.h>
 #endif //_OPENMP
 
-#include "include/perlin.h"
+#include "perlin.h"
 
 #define N_OCTAVES 4
 
